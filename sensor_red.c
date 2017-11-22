@@ -1,13 +1,17 @@
-#include <errno.h>
-#include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <termios.h>
 #include <unistd.h>
+#include <libusb-1.0/libusb.h>
+#include <errno.h>
+#include <hidapi/hidapi.h>
 #include <ncurses.h>
 #include <panel.h>
-#include <stdint.h>
+
+#define PID 0x5750
+#define VID 0x0483
+
+#define oops(msg) { strerror(msg); return -1; }
 
 void printProgress (WINDOW *win, double percentage)
 {
@@ -15,7 +19,7 @@ void printProgress (WINDOW *win, double percentage)
     int i;
     str = malloc((int)percentage);
     memset(str, 0, (int)percentage);
-    for (i = 0; i <= (int)percentage; i++)
+    for (i = 0; i <= (int)percentage>>4; i++)
     {
        strcat(str, "|");
     }
@@ -23,41 +27,20 @@ void printProgress (WINDOW *win, double percentage)
     free(str);
 }
 
-void change_speed(int fd, struct termios *tty, speed_t speed)
-{
-    cfsetospeed(tty, speed);
-    cfsetispeed(tty, speed);
-    if (tcsetattr(fd, TCSANOW, tty) != 0) {
-        printf("Error from tcsetattr\n");
-        return;
-    }
-
-}
 int main(int argc, char* argv[])
 {
-    int fd;
-    char buf[80];
+
     int wlen;
-    struct termios *tty;
-    unsigned char *p, str[6];
+    char com[3] = {0x02, 'S', 0x00};
+    unsigned char str[8], buf[8], *p;
+    hid_device *handle;
     int i;
     WINDOW *win;
     PANEL *pan;
-
-    if ((tty = malloc(sizeof(struct termios))) == NULL) {
-        printf("Error of allocation\n");
-        return -1;
-    }
-    memset(tty, 0, sizeof(struct termios));
-    fd = open(argv[1], O_RDWR | O_NOCTTY | O_SYNC);
-    if (fd < 0) {
-        printf("Error opening %s: %s\n", argv[1], strerror(errno));
-        return -1;
-    }
-    tty->c_cc[VMIN] = 1;
-    tty->c_cc[VTIME] = 5;
-    tty->c_iflag &= IGNBRK;
-
+    memset(str, 0, sizeof(str));
+    memset(buf, 0, sizeof(buf));
+    if ((handle = hid_open(VID, PID, NULL)) == NULL)
+       oops(errno);
     initscr();
     cbreak();
     noecho();
@@ -79,26 +62,20 @@ int main(int argc, char* argv[])
     wrefresh(win);
     pan = new_panel(win);
     update_panels();
-    mvwprintw(win, 0, 48,"Temperature");
+    mvwprintw(win, 0, 48,"Absolute pressure");
     doupdate();
 
     for ( ;; )
     {
-       int len = 0;
+       int len=0;
        char *r;
-       change_speed(fd, tty, B38400);
-       wlen = write(fd, "O \0", 4);
-        if (wlen != 4) {
-            printf("Error from write: %d, %d\n", wlen, errno);
-        }
-        tcdrain(fd);    /* delay for output */
-        change_speed(fd, tty, B115200);
-        wlen = read(fd, buf, 4);
-        if (wlen == 4) {
-           p = buf;
-           if (*p == 0x00)
-              ++p;
-           for ( i = 0; i < 4; i++, p++)
+       hid_set_nonblocking(handle, 1);
+       wlen = hid_write(handle, com, 3);
+       wlen = hid_read(handle, buf, 8);
+       if (buf[1] >= 3)
+       {
+           p = buf+2;
+           for ( i = 0; i < buf[1]; i++, p++)
                 len+=snprintf(str+len, sizeof(str)-len, "%x", *p);
            r = strchr(str, 'a');
            if (r != NULL)
@@ -112,10 +89,9 @@ int main(int argc, char* argv[])
            update_panels();
            printProgress(win, atof(str));
            doupdate();
-        }
-          usleep(500000);
+       }
+       sleep(1);
     }
-    close(fd);
     free(win);
     endwin();
 return 0;
