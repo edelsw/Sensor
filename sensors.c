@@ -21,16 +21,19 @@
 
 void printProgress (WINDOW *win, double percentage, int len)
 {
-    char *str;
+    char str[100];
     int i;
-    str = malloc((int)percentage);
-    memset(str, 0, (int)percentage);
+    if (percentage < 0)
+       mvwprintw(win, 3, 10,"\r%.2f %.*s", percentage, 100, "");
+    else
+    {
+    memset(str, 0, sizeof(str));
     for (i = 0; i <= (int)percentage>>len; i++)
     {
-       strcat(str, "|");
+       strncat(str, "|", 1);
     }
     mvwprintw(win, 3, 10,"\r%.2f %.*s", percentage, 100, str);
-    free(str);
+    }
 }
 
 char* parsing(unsigned char* str, int wlen, unsigned char *p)
@@ -70,10 +73,8 @@ void* temperature(void* arg)
     unsigned char *p, str[6];
     int i;
 
-    if ((tty = malloc(sizeof(struct termios))) == NULL) {
-        printf("Error of allocation\n");
-        return 0;
-    }
+    while((tty = malloc(sizeof(struct termios))) == NULL)
+        usleep(500000);
     memset(tty, 0, sizeof(struct termios));
 
     while((fd = open(arg, O_RDWR | O_NOCTTY | O_SYNC)) < 0)
@@ -89,8 +90,6 @@ void* temperature(void* arg)
 
     for ( ;; )
     {
-       int len = 0;
-       char *r;
        change_speed(fd, tty, B38400);
        wlen = write(fd, "O \0", 4);
         if (wlen != 4) {
@@ -104,24 +103,25 @@ void* temperature(void* arg)
            if (*p == 0x00)
               ++p;
            update_panels();
-           printProgress(win[0], atof(parsing(str, wlen, p)), 0);
+           printProgress(win[0], atof(parsing(str, wlen, p)), 1);
            doupdate();
         }
           usleep(500000);
     }
     close(fd);
+    free(tty);
 }
 
 void* pressure(void *arg)
 {
-    int wlen;
-    char com[3] = {0x02, 'S', 0x00};
-    unsigned char str[8], buf[8], *p;
+    int writelen;
+    char command[3] = {0x02, 'S', 0x00};
+    unsigned char string[8], buffer[8], *pointer;
     hid_device *handle;
-    int i;
+    int count;
 
-    memset(str, 0, sizeof(str));
-    memset(buf, 0, sizeof(buf));
+    memset(string, 0, sizeof(string));
+    memset(buffer, 0, sizeof(buffer));
     while ((handle = hid_open(VID, PID, NULL)) == NULL)
     {
        sleep(1);
@@ -132,25 +132,25 @@ void* pressure(void *arg)
 
     for ( ;; )
     {
-       int len = 0;
-       char *r;
        hid_set_nonblocking(handle, 1);
-       wlen = hid_write(handle, com, 3);
-       wlen = hid_read(handle, buf, 8);
-       if (buf[1] >= 3)
+       writelen = hid_write(handle, command, 3);
+       writelen = hid_read(handle, buffer, 8);
+       if (buffer[1] >= 3)
        {
-           p = buf+2;
+           pointer = buffer+2;
            update_panels();
-           printProgress(win[1], atof(parsing(str, buf[1], p)), 4);
+           printProgress(win[1], atof(parsing(string, buffer[1], pointer)), 4);
            doupdate();
        }
        usleep(500000);
     }
+    hid_close(handle);
 }
 
 int main(int argc, char* argv[])
 {
     pthread_t temp, press;
+
     initscr();
     cbreak();
     noecho();
