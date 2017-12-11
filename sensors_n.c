@@ -12,8 +12,6 @@
 #define PID 0x5750
 #define VID 0x0483
 
-#define oops(msg) { strerror(msg); return 0; }
-
 struct param {
 unsigned char name[80];
 unsigned char trace[8];
@@ -83,19 +81,9 @@ void* temperature(void* arg)
 
     for ( ;; )
     {
-/*       change_speed(fd, tty, B38400);
-       wlen = write(fd, "O \0", 4);
-        tcdrain(fd);
         change_speed(fd, tty, B115200);
-        wlen = read(fd, buf, sizeof(buf));
-        if (wlen >= 4)
-        {
-           p = buf;
-           if (*p == 0x00)
-               ++p;*/
-        change_speed(fd, tty, B115200);
-        wlen = read(fd, buf, sizeof(buf));
-        if (wlen > 0 && wlen < 6)
+        wlen = read(fd, buf, 6);
+        if (wlen > 0 && wlen <= 6)
         {
            p = buf;
            if (*p == 0x00)
@@ -112,7 +100,6 @@ void* temperature(void* arg)
            }
            else
                printf("\r%30.2f", atof(parsing(str, sizeof(str), wlen, p)));
-           //fflush(stdout);
         }
            usleep(10000);
     }
