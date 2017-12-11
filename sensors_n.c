@@ -19,6 +19,8 @@ unsigned char name[80];
 unsigned char trace[8];
 };
 
+const char speed[17] = "С 10 FREQ=10000\0";
+
 char* parsing(unsigned char* str, int lenght, int wlen, unsigned char *p)
 {
 int i, len=0;
@@ -34,6 +36,9 @@ char *r;
     r = strchr(str, 'c');
     if (r != NULL)
         *r = '0';
+    r = strstr(str, "cc");
+    if (r != NULL)
+        sprintf(str, ".0");
 return str;
 }
 
@@ -50,7 +55,7 @@ void change_speed(int fd, struct termios *tty, speed_t speed)
 void* temperature(void* arg)
 {
     int fd;
-    char buf[80];
+    char buf[8];
     int wlen;
     struct termios *tty;
     unsigned char *p, str[6];
@@ -67,34 +72,49 @@ void* temperature(void* arg)
     tty->c_cc[VTIME] = 5;
     tty->c_iflag &= IGNBRK;
 
+    change_speed(fd, tty, B38400);
+    wlen = write(fd, speed, sizeof(speed));
+    tcdrain(fd);
+
+    wlen = write(fd, "I \0", 4);
+    tcdrain(fd);
+    wlen = write(fd, "S \0", 4);
+    tcdrain(fd);
+
     for ( ;; )
     {
-       change_speed(fd, tty, B38400);
+/*       change_speed(fd, tty, B38400);
        wlen = write(fd, "O \0", 4);
-        if (wlen != 4) {
-            printf("Error from write: %d, %d\n", wlen, errno);
-        }
         tcdrain(fd);
         change_speed(fd, tty, B115200);
-        wlen = read(fd, buf, 4);
-        if (wlen == 4) {
+        wlen = read(fd, buf, sizeof(buf));
+        if (wlen >= 4)
+        {
            p = buf;
            if (*p == 0x00)
-              ++p;
+               ++p;*/
+        change_speed(fd, tty, B115200);
+        wlen = read(fd, buf, sizeof(buf));
+        if (wlen > 0 && wlen < 6)
+        {
+           p = buf;
+           if (*p == 0x00)
+               ++p;
            if (!strcmp(tempP->trace, "trace"))
            {
                int i, len = 0;
                unsigned char string[7], *pointer;
                pointer = p;
+
                for ( i = 0; i < wlen; i++, pointer++)
                     len+=snprintf(string+len, sizeof(string)-len, "%x", *pointer);
-               printf("\r%3.2f  %s", atof(parsing(str, sizeof(str), wlen, p)), string);
+               printf("\r%30.2f  %s", atof(parsing(str, sizeof(str), wlen, p)), string);
            }
            else
-               printf("\r%3.2f", atof(parsing(str, sizeof(str), wlen, p)));
-           fflush(stdout);
+               printf("\r%30.2f", atof(parsing(str, sizeof(str), wlen, p)));
+           //fflush(stdout);
         }
-          usleep(500000);
+           usleep(10000);
     }
     close(fd);
     free(tty);
@@ -102,9 +122,9 @@ void* temperature(void* arg)
 
 void* pressure(void *arg)
 {
+    const char command[3] = {0x02, 'S', 0x00};
     int writelen;
     struct param *preP = (struct param *)arg;
-    char command[3] = {0x02, 'S', 0x00};
     unsigned char string[8], buffer[8], *pointer;
     hid_device *handle;
     int count;
@@ -115,12 +135,13 @@ void* pressure(void *arg)
     {
        sleep(1);
     }
+       hid_set_nonblocking(handle, 1);
+       writelen = hid_write(handle, speed, sizeof(speed));
+       writelen = hid_write(handle, command, 3);
 
     for ( ;; )
     {
-       hid_set_nonblocking(handle, 1);
-       writelen = hid_write(handle, command, 3);
-       writelen = hid_read(handle, buffer, 8);
+       writelen = hid_read(handle, buffer, sizeof(buffer));
        if (buffer[1] >= 3)
        {
            pointer = buffer+2;
@@ -131,12 +152,13 @@ void* pressure(void *arg)
                p = pointer;
                for ( i = 0; i < writelen; i++, p++)
                     len+=snprintf(str+len, sizeof(str)-len, "%x", *p);
-               printf("\r%23.2f  %s", atof(parsing(string, sizeof(string), writelen, pointer)), str);
+               printf("\r%3.2f  %s", atof(parsing(string, sizeof(string), writelen, pointer)), str);
            }
            else
-               printf("\r%23.2f", atof(parsing(string, sizeof(string), writelen, pointer)));
+               printf("\r%3.2f", atof(parsing(string, sizeof(string), writelen, pointer)));
        }
-       usleep(500000);
+       fflush(stdout);
+       usleep(10000);
     }
     hid_close(handle);
 }
@@ -148,7 +170,7 @@ struct param par;
     (argv[1]!= NULL) ? strcpy(par.name, argv[1]) : NULL;
     (argv[2]!=NULL) ? strcpy(par.trace, argv[2]) : NULL;
     pthread_t temp, press;
-    printf("Temperature     Absolute pressure\n");
+    printf("Absolute pressure     Temperature\n");
     pthread_create(&temp, NULL, temperature, &par);
     pthread_create(&press, NULL, pressure, &par);
     pthread_join(temp, NULL);
